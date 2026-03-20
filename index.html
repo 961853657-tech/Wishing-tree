@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MAGIC WORLD</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&display=swap" rel="stylesheet">
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/examples/jsm/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/vision_bundle.mjs"
+            }
+        }
+    </script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            overflow: hidden;
+            font-family: "Times New Roman", serif;
+            color: #FFD700;
+            width: 100vw;
+            height: 100vh;
+        }
+        #canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            transition: opacity 0.5s;
+        }
+        h1 {
+            font-family: "Cinzel", serif;
+            font-size: 56px;
+            margin-top: 40px;
+            background: linear-gradient(to bottom, #FFF8DC, #FFD700);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
+            text-align: center;
+        }
+        .controls {
+            position: absolute;
+            bottom: 80px;
+            pointer-events: auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        button {
+            padding: 12px 24px;
+            border: 1px solid #FFD700;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            color: #FFD700;
+            cursor: pointer;
+            font-family: "Cinzel", serif;
+            letter-spacing: 2px;
+            transition: 0.3s;
+            text-transform: uppercase;
+        }
+        button:hover {
+            background: rgba(255, 215, 0, 0.2);
+        }
+        .instructions {
+            margin-top: 10px;
+            font-size: 12px;
+            opacity: 0.6;
+        }
+        #video-container {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            opacity: 0.5;
+            pointer-events: none;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 215, 0, 0.3);
+            z-index: 10;
+        }
+        video {
+            width: 160px;
+            height: 120px;
+            transform: scaleX(-1);
+            object-fit: cover;
+        }
+        #loading-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(10px);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            transition: opacity 0.8s ease;
+        }
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 2px solid rgba(255, 215, 0, 0.2);
+            border-top: 1px solid #FFD700;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .loading-text {
+            letter-spacing: 4px;
+            font-size: 12px;
+            color: #FFD700;
+        }
+        #error-screen {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 0, 0, 0.6);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            z-index: 100;
+            font-family: sans-serif;
+            font-size: 14px;
+            backdrop-filter: blur(4px);
+            border: 1px solid rgba(255,255,255,0.2);
+            display: none;
+        }
+        #error-screen button {
+            margin-left: 15px;
+            padding: 4px 12px;
+            background: white;
+            color: black;
+            border: none;
+            border-radius: 4px;
+            font-family: sans-serif;
+            letter-spacing: normal;
+            text-transform: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+
+    <div id="loading-screen">
+        <div class="spinner"></div>
+        <div class="loading-text">LOADING WISHING TREE</div>
+    </div>
+
+    <div id="error-screen">
+        <span id="error-message"></span>
+        <button onclick="window.location.reload()">Retry</button>
+    </div>
+
+    <div id="ui-layer">
+        <h1>WISHING TREE</h1>
+        <div class="controls">
+            <button onclick="document.getElementById('file-input').click()">Make a wish</button>
+            <input type="file" id="file-input" hidden accept="image/*">
+            <div class="instructions">Press 'H' to Hide Controls • Thumbs up to gather • Release to scatter</div>
+        </div>
+    </div>
+
+    <div id="video-container">
+        <video id="webcam" autoPlay playsInline muted></video>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+        import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+        import { HandLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
+
+        // State variables
+        let uiHidden = false;
+        let currentCardIndex = 0;
+        let targetRotation = 0;
+        let currentRotation = 0;
+        let isScattered = false;
+        let handWorldPos = new THREE.Vector3(0, 0, 0);
+        let targetHandWorldPos = new THREE.Vector3(0, 0, 0);
+        let handLandmarker = null;
+        let lastVideoTime = -1;
+        let lastHandX = 0.5;
+        let isHandPresent = false;
+        let cards = [];
+        let cardOriginals = [];
+
+        // DOM Elements
+        const container = document.getElementById('canvas-container');
+        const video = document.getElementById('webcam');
+        const loadingScreen = document.getElementById('loading-screen');
+        const errorScreen = document.getElementById('error-screen');
+        const errorMessage = document.getElementById('error-message');
+        const uiLayer = document.getElementById('ui-layer');
+        const fileInput = document.getElementById('file-input');
+
+        function showError(msg) {
+            errorMessage.textContent = '⚠️ ' + msg;
+            errorScreen.style.display = 'block';
+        }
+
+        // --- Scene Setup ---
+        const scene = new THREE.Scene();
+        
+        const textureLoader = new THREE.TextureLoader();
+        textureLoader.setCrossOrigin('anonymous');
+        textureLoader.load('https://images.unsplash.com/photo-1500673922987-e212871fec22?q=80&w=1920&auto=format&fit=crop', (texture) => {
+            texture.colorSpace = THREE.SRGBColorSpace;
+            const imageAspect = texture.image.width / texture.image.height;
+            const screenAspect = window.innerWidth / window.innerHeight;
+            if (screenAspect > imageAspect) {
+                texture.repeat.set(1, imageAspect / screenAspect);
+                texture.offset.set(0, (1 - texture.repeat.y) / 2);
+            } else {
+                texture.repeat.set(screenAspect / imageAspect, 1);
+                texture.offset.set((1 - texture.repeat.x) / 2, 0);
+            }
+            scene.background = texture;
+        });
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 2, 50);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setClearColor(0x000000, 0);
+        renderer.toneMapping = THREE.ReinhardToneMapping;
+        renderer.toneMappingExposure = 2.2;
+        container.appendChild(renderer.domElement);
+
+        const pmremGenerator = new THREE.PMREMGenerator(renderer);
+        scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+
+        const mainGroup = new THREE.Group();
+        scene.add(mainGroup);
+
+        // Lights
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const pLight = new THREE.PointLight(0xffaa00, 2, 50);
+        pLight.position.set(0, 5, 0);
+        scene.add(pLight);
+
+        const spot1 = new THREE.SpotLight(0xFFD700, 1200);
+        spot1.position.set(30, 40, 40);
+        scene.add(spot1);
+
+        const spot2 = new THREE.SpotLight(0xFF0000, 600);
+        spot2.position.set(-30, 20, -30);
+        scene.add(spot2);
+
+        // Post Processing
+        const composer = new EffectComposer(renderer);
+        composer.addPass(new RenderPass(scene, camera));
+        const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.6, 0.4, 0.7);
+        composer.addPass(bloomPass);
+
+        // Gold Ingot (Yuanbao) Texture
+        const canvas = document.createElement('canvas');
+        canvas.width = 64; canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+        
+        const gradient = ctx.createLinearGradient(0, 10, 0, 50);
+        gradient.addColorStop(0, '#FFF8DC');
+        gradient.addColorStop(0.4, '#FFD700');
+        gradient.addColorStop(1, '#B8860B');
+
+        ctx.fillStyle = gradient;
+        ctx.shadowColor = '#FFD700';
+        ctx.shadowBlur = 6;
+
+        // Draw Yuanbao shape
+        ctx.beginPath();
+        // Left wing
+        ctx.moveTo(12, 24);
+        // Bottom curve
+        ctx.quadraticCurveTo(32, 54, 52, 24);
+        // Right wing top
+        ctx.quadraticCurveTo(58, 14, 45, 26);
+        // Inner top curve
+        ctx.quadraticCurveTo(32, 34, 19, 26);
+        // Left wing top
+        ctx.quadraticCurveTo(6, 14, 12, 24);
+        ctx.fill();
+        
+        // Center bump
+        ctx.beginPath();
+        ctx.ellipse(32, 24, 14, 10, 0, Math.PI, 0);
+        ctx.fill();
+
+        // Inner highlight line
+        ctx.strokeStyle = '#DAA520';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(18, 28);
+        ctx.quadraticCurveTo(32, 40, 46, 28);
+        ctx.stroke();
+
+        const particleTexture = new THREE.CanvasTexture(canvas);
+
+        // Golden Stars
+        const height = 30;
+        const radius = 12;
+        const count = 26;
+        
+        const starShape = new THREE.Shape();
+        const outerRadius = 2;
+        const innerRadius = 0.8;
+        const spikes = 5;
+        for (let i = 0; i < spikes * 2; i++) {
+            const r = i % 2 === 0 ? outerRadius : innerRadius;
+            const angle = (i / (spikes * 2)) * Math.PI * 2 - Math.PI / 2;
+            if (i === 0) {
+                starShape.moveTo(Math.cos(angle) * r, Math.sin(angle) * r);
+            } else {
+                starShape.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
+            }
+        }
+        starShape.closePath();
+        
+        const extrudeSettings = { depth: 0.33, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: 0.13, bevelThickness: 0.13 };
+        const cardGeo = new THREE.ExtrudeGeometry(starShape, extrudeSettings);
+        cardGeo.center();
+
+        const cardMat = new THREE.MeshStandardMaterial({
+            color: 0xffd700,
+            emissive: 0xFFD700,
+            emissiveIntensity: 0.2,
+            side: THREE.DoubleSide,
+            metalness: 1.0,
+            roughness: 0.2
+        });
+
+        for(let i = 0; i < count; i++) {
+            const card = new THREE.Mesh(cardGeo, cardMat);
+            const t = i / (count - 1);
+            const y = t * height;
+            const r = radius * Math.pow(1 - y / height, 1.2) + 2; 
+            const theta = i * Math.PI * 1.5;
+            
+            const px = r * Math.cos(theta);
+            const py = y - height/2;
+            const pz = r * Math.sin(theta);
+
+            card.position.set(px, py, pz);
+            card.lookAt(px * 2, py, pz * 2);
+
+            scene.add(card);
+            cards.push(card);
+
+            cardOriginals.push({
+                treePos: card.position.clone(),
+                treeRot: card.rotation.clone(),
+                fireworkPos: new THREE.Vector3(),
+                velocity: new THREE.Vector3(),
+                rotVelocity: new THREE.Vector3()
+            });
+        }
+        
+        // Star
+        const starGeo = new THREE.OctahedronGeometry(1.5);
+        const starMat = new THREE.MeshStandardMaterial({
+            color: 0xffeebb,
+            emissive: 0xffaa00,
+            emissiveIntensity: 2,
+            roughness: 0.2,
+            metalness: 1
+        });
+        const star = new THREE.Mesh(starGeo, starMat);
+        star.position.y = height / 2 + 1;
+        mainGroup.add(star);
+
+        // Animation Loop
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = clock.getElapsedTime();
+
+            currentRotation += (targetRotation - currentRotation) * 0.05;
+            if (!isHandPresent) {
+                targetRotation += 0.002;
+                targetHandWorldPos.set(0, 0, 0);
+                if (!isScattered) {
+                    isScattered = true;
+                    cards.forEach((card, i) => {
+                        const orig = cardOriginals[i];
+                        orig.fireworkPos.copy(card.position);
+                        const outward = card.position.clone().normalize();
+                        orig.velocity.copy(outward).multiplyScalar(Math.random() * 2 + 1);
+                        orig.velocity.y += Math.random() * 3 + 2;
+                        orig.rotVelocity.set(
+                            (Math.random() - 0.5) * 0.4,
+                            (Math.random() - 0.5) * 0.4,
+                            (Math.random() - 0.5) * 0.4
+                        );
+                    });
+                }
+            }
+
+            handWorldPos.lerp(targetHandWorldPos, 0.1);
+            mainGroup.position.copy(handWorldPos);
+            mainGroup.rotation.y = currentRotation;
+            mainGroup.updateMatrixWorld();
+
+            star.rotation.y = time;
+            star.rotation.z = time * 0.5;
+
+            const targetEmissive = isScattered ? 2.0 : 0.2;
+            cardMat.emissiveIntensity += (targetEmissive - cardMat.emissiveIntensity) * 0.1;
+
+            cards.forEach((card, i) => {
+                const orig = cardOriginals[i];
+                
+                if (isScattered) {
+                    orig.velocity.y -= 0.05; // Gravity
+                    orig.velocity.multiplyScalar(0.95); // Drag
+                    orig.fireworkPos.add(orig.velocity);
+                    
+                    // Add gentle floating
+                    orig.fireworkPos.x += Math.sin(time * 2 + i) * 0.03;
+                    orig.fireworkPos.y += Math.cos(time * 1.5 + i) * 0.03;
+                    orig.fireworkPos.z += Math.sin(time * 2.5 + i) * 0.03;
+                    
+                    card.position.copy(orig.fireworkPos);
+                    card.rotation.x += orig.rotVelocity.x;
+                    card.rotation.y += orig.rotVelocity.y;
+                    card.rotation.z += orig.rotVelocity.z;
+                    orig.rotVelocity.multiplyScalar(0.98);
+                } else {
+                    const targetPos = orig.treePos.clone().applyMatrix4(mainGroup.matrixWorld);
+                    card.position.lerp(targetPos, 0.1);
+                    
+                    const targetQuat = new THREE.Quaternion().setFromEuler(orig.treeRot);
+                    const groupQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, currentRotation, 0));
+                    targetQuat.premultiply(groupQuat);
+                    card.quaternion.slerp(targetQuat, 0.1);
+                    
+                    card.position.y += Math.sin(time * 2 + i) * 0.02;
+                }
+            });
+
+            composer.render();
+        }
+        animate();
+
+        // Resize handler
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+            
+            if (scene.background && scene.background.isTexture) {
+                const texture = scene.background;
+                const imageAspect = texture.image.width / texture.image.height;
+                const screenAspect = window.innerWidth / window.innerHeight;
+                
+                if (screenAspect > imageAspect) {
+                    texture.repeat.set(1, imageAspect / screenAspect);
+                    texture.offset.set(0, (1 - texture.repeat.y) / 2);
+                } else {
+                    texture.repeat.set(screenAspect / imageAspect, 1);
+                    texture.offset.set((1 - texture.repeat.x) / 2, 0);
+                }
+            }
+        });
+
+        // Initialize MediaPipe
+        async function initMediaPipe() {
+            try {
+                const vision = await FilesetResolver.forVisionTasks(
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+                );
+                handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
+                        delegate: "GPU"
+                    },
+                    runningMode: "VIDEO",
+                    numHands: 1
+                });
+
+                if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+                    video.srcObject = stream;
+                    video.play().catch(e => console.error("Video play error:", e));
+                    video.addEventListener("loadeddata", predictWebcam);
+                } else {
+                    showError("Camera API not supported in this browser (requires HTTPS).");
+                }
+                loadingScreen.style.opacity = '0';
+                setTimeout(() => loadingScreen.style.display = 'none', 800);
+            } catch (err) {
+                console.error("Error initializing MediaPipe:", err);
+                if (err.name === 'NotAllowedError') {
+                    showError("Camera access denied. Please allow camera permissions.");
+                } else if (err.message && (err.message.includes('fetch') || err.message.includes('network'))) {
+                    showError("Failed to download AI model. Please check your network (VPN might be required).");
+                } else {
+                    showError("Failed to initialize: " + (err.message || "Unknown error. If in WeChat/QQ, open in Safari/Chrome."));
+                }
+                loadingScreen.style.opacity = '0';
+                setTimeout(() => loadingScreen.style.display = 'none', 800);
+            }
+        }
+
+        function predictWebcam() {
+            if (!handLandmarker) return;
+            
+            let startTimeMs = performance.now();
+            if (video.currentTime !== lastVideoTime) {
+                lastVideoTime = video.currentTime;
+                const results = handLandmarker.detectForVideo(video, startTimeMs);
+                
+                if (results.landmarks && results.landmarks.length > 0) {
+                    isHandPresent = true;
+                    const hand = results.landmarks[0];
+                    
+                    const x = hand[9].x; 
+                    const deltaX = lastHandX - x;
+                    lastHandX = x;
+                    
+                    if (Math.abs(deltaX) > 0.005) {
+                        targetRotation += deltaX * 3;
+                    }
+
+                    const thumb = hand[4];
+                    const index = hand[8];
+                    
+                    // Thumbs up recognition
+                    const thumbExtended = hand[4].y < hand[3].y && hand[3].y < hand[2].y;
+                    const indexCurled = hand[8].y > hand[6].y;
+                    const middleCurled = hand[12].y > hand[10].y;
+                    const ringCurled = hand[16].y > hand[14].y;
+                    const pinkyCurled = hand[20].y > hand[18].y;
+                    const thumbAboveFingers = hand[4].y < hand[5].y;
+                    const isThumbsUp = thumbExtended && indexCurled && middleCurled && ringCurled && pinkyCurled && thumbAboveFingers;
+
+                    const midX = hand[9].x;
+                    const midY = hand[9].y;
+                    const vFov = camera.fov * Math.PI / 180;
+                    const visibleHeight = 2 * Math.tan(vFov / 2) * camera.position.z;
+                    const visibleWidth = visibleHeight * camera.aspect;
+                    
+                    targetHandWorldPos.x = -(midX - 0.5) * visibleWidth;
+                    targetHandWorldPos.y = -(midY - 0.5) * visibleHeight;
+
+                    if (!isThumbsUp && !isScattered) {
+                        isScattered = true;
+                        cards.forEach((card, i) => {
+                            const orig = cardOriginals[i];
+                            orig.fireworkPos.copy(card.position);
+                            const outward = card.position.clone().sub(handWorldPos).normalize();
+                            orig.velocity.copy(outward).multiplyScalar(Math.random() * 2 + 1);
+                            orig.velocity.y += Math.random() * 3 + 2;
+                            orig.rotVelocity.set(
+                                (Math.random() - 0.5) * 0.4,
+                                (Math.random() - 0.5) * 0.4,
+                                (Math.random() - 0.5) * 0.4
+                            );
+                        });
+                    } else if (isThumbsUp && isScattered) {
+                        isScattered = false;
+                    }
+                } else {
+                    isHandPresent = false;
+                }
+            }
+            requestAnimationFrame(predictWebcam);
+        }
+
+        initMediaPipe();
+
+        // Keyboard controls
+        window.addEventListener('keydown', (e) => {
+            if (e.key.toLowerCase() === 'h') {
+                uiHidden = !uiHidden;
+                uiLayer.style.opacity = uiHidden ? '0' : '1';
+            }
+        });
+
+        // File Upload
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file || cards.length === 0) return;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    const cardIndex = currentCardIndex % cards.length;
+                    const card = cards[cardIndex];
+
+                    const combinedCanvas = document.createElement('canvas');
+                    combinedCanvas.width = 256; 
+                    combinedCanvas.height = 512;
+                    const ctx = combinedCanvas.getContext('2d');
+                    
+                    const imgAspect = img.width / img.height;
+                    const canvasAspect = 256 / 512;
+                    let drawWidth = 256;
+                    let drawHeight = 512;
+                    let offsetX = 0;
+                    let offsetY = 0;
+                    
+                    if (imgAspect > canvasAspect) {
+                        drawWidth = 512 * imgAspect;
+                        offsetX = (256 - drawWidth) / 2;
+                    } else {
+                        drawHeight = 256 / imgAspect;
+                        offsetY = (512 - drawHeight) / 2;
+                    }
+                    ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
+                    
+                    ctx.strokeStyle = '#FFD700';
+                    ctx.fillStyle = '#FFD700';
+                    
+                    ctx.lineWidth = 4;
+                    ctx.strokeRect(12, 12, 232, 488);
+                    ctx.lineWidth = 1.5;
+                    ctx.strokeRect(20, 20, 216, 472);
+                    
+                    drawDiamond(20, 20, 8, ctx);
+                    drawDiamond(236, 20, 8, ctx);
+                    drawDiamond(20, 492, 8, ctx);
+                    drawDiamond(236, 492, 8, ctx);
+
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(20, 80);
+                    ctx.quadraticCurveTo(128, 10, 236, 80);
+                    ctx.stroke();
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(20, 432);
+                    ctx.quadraticCurveTo(128, 502, 236, 432);
+                    ctx.stroke();
+
+                    const finalTexture = new THREE.CanvasTexture(combinedCanvas);
+                    finalTexture.colorSpace = THREE.SRGBColorSpace;
+
+                    if (card.material instanceof THREE.MeshStandardMaterial) {
+                        card.material = card.material.clone();
+                        card.material.map = finalTexture;
+                        card.material.emissiveIntensity = 0.05;
+                        card.material.needsUpdate = true;
+                    }
+
+                    card.scale.set(1, 1, 1);
+                    currentCardIndex += 1;
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+    </script>
+</body>
+</html>
+

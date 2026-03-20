@@ -1,0 +1,5 @@
+{
+  "name": "Interactive AI Christmas Tree",
+  "description": "A 3D Christmas tree with hand-tracking rotation and photo upload capabilities.",
+  "requestFramePermissions": ["camera"]
+}
